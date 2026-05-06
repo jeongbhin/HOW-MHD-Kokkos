@@ -9,15 +9,21 @@ obj/
 *.exe
 
 # runtime outputs
-dump/
 output/
 outputs/
+dump/
 restart/
 *.dat
 *.vtk
 *.h5
 *.out
 *.log
+
+# figures / images
+*.png
+*.jpg
+*.jpeg
+*.pdf
 
 # editor / system
 .DS_Store
