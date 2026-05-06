@@ -1,0 +1,31 @@
+# build outputs
+build/
+bin/
+obj/
+*.o
+*.mod
+*.a
+*.so
+*.exe
+
+# runtime outputs
+dump/
+output/
+outputs/
+restart/
+*.dat
+*.vtk
+*.h5
+*.out
+*.log
+
+# editor / system
+.DS_Store
+.vscode/
+.idea/
+
+# slurm / hpc
+slurm-*.out
+*.err
+core
+core.*
