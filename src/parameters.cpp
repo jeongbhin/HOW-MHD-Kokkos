@@ -39,6 +39,7 @@ void read_parameters(std::istream& in, Parameters& par) {
                 else if (key == "x2bc")   in >> par.x2bc;
                 else if (key == "x3bc")   in >> par.x3bc;
 		else if (key == "problem") in >> par.problem;
+		else if (key == "output_format") in >> par.output_format;
 		else if (key[0] == '#') {
 		    std::string dummy;
 		    std::getline(in, dummy);

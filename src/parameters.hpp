@@ -14,10 +14,12 @@ struct Parameters {
 
 	double rhomin, pgmin;
 	
-	std::string x1bc;
-	std::string x2bc;
-	std::string x3bc;
     	std::string problem; 
+	std::string x1bc = "open";
+	std::string x2bc = "open";
+	std::string x3bc = "open";
+	std::string output_format = "dat";
+
 };
 
 void read_parameters(std::istream& in, Parameters& par);
