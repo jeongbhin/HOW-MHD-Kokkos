@@ -212,9 +212,7 @@ bin/how-mhd
 ```
 
 depending on the Makefile configuration.
-
 ---
-
 ## Run
 
 Run the code with an input file through standard input:
@@ -226,12 +224,61 @@ Run the code with an input file through standard input:
 For example:
 
 ```bash
-./bin/how-mhd < mhd_rotor.in
+./bin/how-mhd < src/problems/mhd_rotor.in
 ```
 
-If the input files are stored elsewhere, adjust the path accordingly.
-
 ---
+
+### Running with Kokkos OpenMP threads
+
+If HOW-MHD-Kokkos is built with the Kokkos OpenMP backend, the number of CPU threads can be controlled at runtime.
+
+For example, to run with 128 OpenMP threads:
+
+```bash
+export OMP_NUM_THREADS=128
+export KOKKOS_NUM_THREADS=128
+export OMP_PROC_BIND=spread
+export OMP_PLACES=cores
+
+./bin/how-mhd --kokkos-num-threads=128 < input.in
+```
+
+On a Slurm-based HPC system, a typical one-rank OpenMP run is
+
+```bash
+srun -N 1 -n 1 -c 128 --cpu-bind=cores \
+  ./bin/how-mhd --kokkos-num-threads=128 < input.in
+```
+
+Here,
+
+```text
+-N 1   : use one node
+-n 1   : use one MPI rank / one process
+-c 128 : assign 128 CPU cores to the process
+```
+
+The code prints the active Kokkos execution space and concurrency at startup. A successful 128-thread OpenMP run should show something like
+
+```text
+Kokkos execution space: OpenMP
+Kokkos concurrency: 128
+```
+
+If the concurrency is smaller than expected, check the runtime environment:
+
+```bash
+echo $OMP_NUM_THREADS
+echo $KOKKOS_NUM_THREADS
+echo $SLURM_CPUS_PER_TASK
+echo $SLURM_JOB_CPUS_PER_NODE
+env | grep -i kokkos
+```
+
+For large 2D/3D runs, using the Slurm `srun` form is recommended so that CPU allocation and binding are handled explicitly.
+---
+
 
 ## Example Input: MHD Rotor
 
