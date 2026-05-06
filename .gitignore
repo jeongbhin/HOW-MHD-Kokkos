@@ -18,6 +18,7 @@ restart/
 *.h5
 *.out
 *.log
+*.vts
 
 # figures / images
 *.png
