@@ -136,6 +136,7 @@ pgmin
 x1bc
 x2bc
 x3bc
+output_format
 ```
 
 Lines beginning with `#` are treated as comments.
@@ -259,10 +260,150 @@ pgmin 1.0e-12
 x1bc open
 x2bc open
 x3bc open
+
+# ===== output =====
+output_format vtk
 ```
 
 ---
+---
 
+## Output
+
+HOW-MHD-Kokkos supports multiple output formats selected from the input file.
+
+```text
+output_format dat
+```
+
+or
+
+```text
+output_format vtk
+```
+
+### ASCII table output
+
+If
+
+```text
+output_format dat
+```
+
+is selected, the code writes plain text dump files:
+
+```text
+output/dump000000.dat
+output/dump000001.dat
+output/dump000002.dat
+...
+```
+
+Each row corresponds to one active cell. The columns are
+
+```text
+i j k x y z rho Mx My Mz Bx By Bz E pg vx vy vz divB
+```
+
+where `divB` is a cell-centered diagnostic estimate of the magnetic-field divergence.
+
+This format is useful for debugging, quick inspection, and small 2D tests.
+
+### Binary VTK output
+
+If
+
+```text
+output_format vtk
+```
+
+is selected, the code writes ParaView-readable binary VTK StructuredGrid files:
+
+```text
+output/dump000000.vts
+output/dump000001.vts
+output/dump000002.vts
+...
+```
+
+The `.vts` files contain appended raw binary data and can be opened directly with ParaView.
+
+Currently written variables include:
+
+```text
+rho
+pressure
+energy
+v2
+B2
+divB
+velocity
+magnetic_field
+momentum
+```
+
+where
+
+```text
+velocity       = (vx, vy, vz)
+magnetic_field = (Bx, By, Bz)
+momentum       = (Mx, My, Mz)
+v2             = |v|^2
+B2             = |B|^2
+```
+
+This format is recommended for visualization and larger 2D/3D simulations.
+
+### Example
+
+To write binary VTK output, add the following line to the input file:
+
+```text
+# ===== output =====
+output_format vtk
+```
+
+For debugging with plain text output, use
+
+```text
+# ===== output =====
+output_format dat
+```
+
+### Visualization
+
+The VTK output files can be opened directly in ParaView:
+
+```text
+File -> Open -> output/dump000000.vts
+```
+
+For a sequence of dumps, open the `dump*.vts` series in ParaView.
+
+A Python plotting script can also read the `.vts` files using the Python VTK package:
+
+```bash
+pip install vtk
+```
+
+or, on some HPC systems,
+
+```bash
+module avail vtk
+module load vtk
+```
+
+For 3D simulations, the plotting script can extract 2D slices such as
+
+```text
+xy
+xz
+yz
+```
+
+from the binary VTK output.
+
+---
 ## Development Notes
 
 This repository is currently intended for code development, testing, and porting of HOW-MHD components to Kokkos.
