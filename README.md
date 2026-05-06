@@ -76,8 +76,9 @@ HOW-MHD-Kokkos/
     ├── tstep.hpp
     ├── ssprk.cpp
     ├── ssprk.hpp
+    └── ...
     └── problems/
-        ├── mhd_rotor.cpp
+        ├── brio_wu.cpp
         ├── mhd_rotor.hpp
         └── ...
 ```
@@ -193,20 +194,6 @@ Some routines are still under active development.
 
 ---
 
-## Not Yet Included
-
-The current Kokkos development version does **not yet include** the full production-level constrained-transport module.
-
-In particular, the following component is still planned:
-
-```text
-fluxct
-```
-
-This will be added in a future development stage to complete the magnetic-field constrained-transport update.
-
----
-
 ## Build
 
 This code requires a C++ compiler and Kokkos.
@@ -238,7 +225,7 @@ Run the code with an input file through standard input:
 For example:
 
 ```bash
-./bin/how-mhd < src/problems/mhd_rotor.in
+./bin/how-mhd < mhd_rotor.in
 ```
 
 If the input files are stored elsewhere, adjust the path accordingly.
@@ -311,18 +298,6 @@ doi:10.3847/1538-4357/acdf4b
 The original HOW-MHD method is described in:
 
 Seo, J. & Ryu, D. 2023, The Astrophysical Journal, 953, 39.
-
----
-
-## License
-
-Please add an appropriate license before distributing this code publicly.
-
-Recommended options for academic open-source codes include:
-
-- MIT License
-- BSD 3-Clause License
-- GPLv3 License
 
 ---
 
