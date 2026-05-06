@@ -266,7 +266,6 @@ output_format vtk
 ```
 
 ---
----
 
 ## Output
 
