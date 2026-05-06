@@ -292,9 +292,9 @@ output_format dat
 is selected, the code writes plain text dump files:
 
 ```text
-output/dump000000.dat
-output/dump000001.dat
-output/dump000002.dat
+bin/output/dump000000.dat
+bin/output/dump000001.dat
+bin/output/dump000002.dat
 ...
 ```
 
@@ -319,9 +319,9 @@ output_format vtk
 is selected, the code writes ParaView-readable binary VTK StructuredGrid files:
 
 ```text
-output/dump000000.vts
-output/dump000001.vts
-output/dump000002.vts
+bin/output/dump000000.vts
+bin/output/dump000001.vts
+bin/output/dump000002.vts
 ...
 ```
 
@@ -374,7 +374,7 @@ output_format dat
 The VTK output files can be opened directly in ParaView:
 
 ```text
-File -> Open -> output/dump000000.vts
+File -> Open -> bin/output/dump000000.vts
 ```
 
 For a sequence of dumps, open the `dump*.vts` series in ParaView.
