@@ -36,3 +36,26 @@ slurm-*.out
 *.err
 core
 core.*
+
+# Build artifacts
+build/
+*.o
+*.mod
+
+# Executables
+bin/how_mhd
+bin/how_mhd_mpi
+how_mhd
+how_mhd_mpi
+
+# Runtime outputs
+bin/output/
+output/
+figures/
+*.vts
+*.pvts
+*.png
+
+# Python cache
+__pycache__/
+*.pyc

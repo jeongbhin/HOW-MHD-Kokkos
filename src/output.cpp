@@ -11,6 +11,33 @@
 #include <cstdint>
 
 // ================================================================
+// MPI-safe output file naming
+// ------------------------------------------------------------
+// In serial mode this preserves the old file names:
+//   dump000010.dat / dump000010.vts
+// In MPI mode each rank writes its own piece:
+//   dump000010_rank000003.dat / dump000010_rank000003.vts
+// ================================================================
+std::string make_output_filename(const Parameters& par,
+                                 int step,
+                                 const std::string& ext) {
+    std::ostringstream filename;
+    filename << "output/dump"
+             << std::setw(6) << std::setfill('0') << step;
+
+#ifdef USE_MPI
+    filename << "_rank"
+             << std::setw(6) << std::setfill('0') << par.cart_rank;
+#else
+    (void)par;
+#endif
+
+    filename << ext;
+    return filename.str();
+}
+
+
+// ================================================================
 // Boundary-condition-aware index helper for host-side diagnostics
 // ================================================================
 int bc_index_host(const int idx,
@@ -42,18 +69,15 @@ void output_dat(Kokkos::View<double*****> q,
 
     std::filesystem::create_directories("output");
 
-    std::ostringstream filename;
-    filename << "output/dump"
-             << std::setw(6) << std::setfill('0') << step
-             << ".dat";
+    const std::string filename = make_output_filename(par, step, ".dat");
 
     auto qh = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), q);
 
-    std::ofstream fout(filename.str());
+    std::ofstream fout(filename);
 
     if (!fout) {
         std::cerr << "Error: cannot open output file "
-                  << filename.str() << "\n";
+                  << filename << "\n";
         return;
     }
 
@@ -61,7 +85,11 @@ void output_dat(Kokkos::View<double*****> q,
 
     fout << "# step = " << step << "\n";
     fout << "# time = " << time << "\n";
-    fout << "# columns: i j k x y z rho Mx My Mz Bx By Bz E pg vx vy vz divB\n";
+    fout << "# rank = " << par.cart_rank << "\n";
+    fout << "# local_active_size = " << par.nx << " " << par.ny << " " << par.nz << "\n";
+    fout << "# global_active_size = " << par.gnx << " " << par.gny << " " << par.gnz << "\n";
+    fout << "# global_start_index = " << par.istart << " " << par.jstart << " " << par.kstart << "\n";
+    fout << "# columns: ig jg kg il jl kl x y z rho Mx My Mz Bx By Bz E pg vx vy vz divB\n";
 
     // ------------------------------------------------------------
     // Active cell-centered range
@@ -82,9 +110,17 @@ void output_dat(Kokkos::View<double*****> q,
         for (int j = jc_lo; j <= jc_hi; ++j) {
             for (int i = ic_lo; i <= ic_hi; ++i) {
 
-                const double x = (static_cast<double>(i - 3) + 0.5) * par.dx;
-                const double y = (static_cast<double>(j - 3) + 0.5) * par.dy;
-                const double z = (static_cast<double>(k - 3) + 0.5) * par.dz;
+                const int il = i - 3;
+                const int jl = j - 3;
+                const int kl = k - 3;
+
+                const int ig = par.istart + il;
+                const int jg = par.jstart + jl;
+                const int kg = par.kstart + kl;
+
+                const double x = (static_cast<double>(ig) + 0.5) * par.dx;
+                const double y = (static_cast<double>(jg) + 0.5) * par.dy;
+                const double z = (static_cast<double>(kg) + 0.5) * par.dz;
 
                 const double rho = qh(0,0,i,j,k);
                 const double Mx  = qh(0,1,i,j,k);
@@ -151,9 +187,12 @@ void output_dat(Kokkos::View<double*****> q,
                     }
                 }
 
-                fout << i - 3 << " "
-                     << j - 3 << " "
-                     << k - 3 << " "
+                fout << ig << " "
+                     << jg << " "
+                     << kg << " "
+                     << il << " "
+                     << jl << " "
+                     << kl << " "
                      << x << " "
                      << y << " "
                      << z << " "
@@ -176,7 +215,7 @@ void output_dat(Kokkos::View<double*****> q,
 
     fout.close();
 
-    std::cout << "Wrote " << filename.str() << "\n";
+    std::cout << "Wrote " << filename << "\n";
 }
 
 
@@ -191,10 +230,7 @@ void output_vts_binary(Kokkos::View<double*****> q,
 
     std::filesystem::create_directories("output");
 
-    std::ostringstream filename;
-    filename << "output/dump"
-             << std::setw(6) << std::setfill('0') << step
-             << ".vts";
+    const std::string filename = make_output_filename(par, step, ".vts");
 
     auto qh = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), q);
 
@@ -246,11 +282,15 @@ void output_vts_binary(Kokkos::View<double*****> q,
                 const int jj = j - 3;
                 const int kk = k - 3;
 
+                const int ig = par.istart + ii;
+                const int jg = par.jstart + jj;
+                const int kg = par.kstart + kk;
+
                 const int p = idx(ii, jj, kk);
 
-                const double x = (static_cast<double>(ii) + 0.5) * par.dx;
-                const double y = (static_cast<double>(jj) + 0.5) * par.dy;
-                const double z = (static_cast<double>(kk) + 0.5) * par.dz;
+                const double x = (static_cast<double>(ig) + 0.5) * par.dx;
+                const double y = (static_cast<double>(jg) + 0.5) * par.dy;
+                const double z = (static_cast<double>(kg) + 0.5) * par.dz;
 
                 const double DD = qh(0,0,i,j,k);
                 const double Mx = qh(0,1,i,j,k);
@@ -370,11 +410,11 @@ void output_vts_binary(Kokkos::View<double*****> q,
     // ------------------------------------------------------------
     // Open file in binary mode
     // ------------------------------------------------------------
-    std::ofstream fout(filename.str(), std::ios::binary);
+    std::ofstream fout(filename, std::ios::binary);
 
     if (!fout) {
         std::cerr << "Error: cannot open output file "
-                  << filename.str() << "\n";
+                  << filename << "\n";
         return;
     }
 
@@ -385,13 +425,20 @@ void output_vts_binary(Kokkos::View<double*****> q,
     fout << "<VTKFile type=\"StructuredGrid\" version=\"0.1\" "
          << "byte_order=\"LittleEndian\" header_type=\"UInt64\">\n";
 
-    fout << "  <StructuredGrid WholeExtent=\"0 " << nx-1
-         << " 0 " << ny-1
-         << " 0 " << nz-1 << "\">\n";
+    const int i0 = par.istart;
+    const int i1 = par.istart + nx - 1;
+    const int j0 = par.jstart;
+    const int j1 = par.jstart + ny - 1;
+    const int k0 = par.kstart;
+    const int k1 = par.kstart + nz - 1;
 
-    fout << "    <Piece Extent=\"0 " << nx-1
-         << " 0 " << ny-1
-         << " 0 " << nz-1 << "\">\n";
+    fout << "  <StructuredGrid WholeExtent=\"0 " << par.gnx - 1
+         << " 0 " << par.gny - 1
+         << " 0 " << par.gnz - 1 << "\">\n";
+
+    fout << "    <Piece Extent=\"" << i0 << " " << i1
+         << " " << j0 << " " << j1
+         << " " << k0 << " " << k1 << "\">\n";
 
     fout << "      <FieldData>\n";
     fout << "        <DataArray type=\"Float64\" Name=\"time\" "
@@ -402,6 +449,14 @@ void output_vts_binary(Kokkos::View<double*****> q,
     fout << "        <DataArray type=\"Int32\" Name=\"step\" "
          << "NumberOfTuples=\"1\" format=\"ascii\">\n";
     fout << "          " << step << "\n";
+    fout << "        </DataArray>\n";
+    fout << "        <DataArray type=\"Int32\" Name=\"rank\" "
+         << "NumberOfTuples=\"1\" format=\"ascii\">\n";
+    fout << "          " << par.cart_rank << "\n";
+    fout << "        </DataArray>\n";
+    fout << "        <DataArray type=\"Int32\" Name=\"global_start_index\" "
+         << "NumberOfComponents=\"3\" NumberOfTuples=\"1\" format=\"ascii\">\n";
+    fout << "          " << par.istart << " " << par.jstart << " " << par.kstart << "\n";
     fout << "        </DataArray>\n";
     fout << "      </FieldData>\n";
 
@@ -491,7 +546,7 @@ void output_vts_binary(Kokkos::View<double*****> q,
 
     fout.close();
 
-    std::cout << "Wrote " << filename.str()
+    std::cout << "Wrote " << filename
               << "  [binary VTS]\n";
 
 }
@@ -514,3 +569,4 @@ void output(Kokkos::View<double*****> q,
         std::abort();
     }
 }
+

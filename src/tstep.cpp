@@ -1,6 +1,12 @@
 #include "tstep.hpp"
-#include <cmath>
+
 #include <algorithm>
+#include <cmath>
+#include <iostream>
+
+#ifdef USE_MPI
+#include <mpi.h>
+#endif
 
 void tstep(Kokkos::View<double*****> q, Parameters& par) {
 
@@ -10,8 +16,17 @@ void tstep(Kokkos::View<double*****> q, Parameters& par) {
 
     using policy_type = Kokkos::MDRangePolicy<Kokkos::Rank<3>>;
 
+    // ------------------------------------------------------------
+    // Local CFL scan on this MPI rank.
+    //
+    // The active cell-centered range is
+    //   i = 3 ... nx+2
+    //   j = 3 ... ny+2
+    //   k = 3 ... nz+2
+    // because each side has three ghost cells.
+    // ------------------------------------------------------------
     Kokkos::parallel_reduce(
-        "tstep",
+        "tstep_local",
         policy_type({3, 3, 3}, {par.nx + 3, par.ny + 3, par.nz + 3}),
         KOKKOS_LAMBDA(const int i, const int j, const int k,
                       double& vxmax_loc,
@@ -35,8 +50,10 @@ void tstep(Kokkos::View<double*****> q, Parameters& par) {
             const double vv2 = vx*vx + vy*vy + vz*vz;
             const double BB2 = Bx*Bx + By*By + Bz*Bz;
 
-            const double pg = fmax(par.pgmin,
-                (par.gam - 1.0) * (EE - 0.5 * (rho * vv2 + BB2)));
+            const double pg = fmax(
+                par.pgmin,
+                (par.gam - 1.0) * (EE - 0.5 * (rho * vv2 + BB2))
+            );
 
             const double bbn2 = BB2 / rho;
             const double cs2  = fmax(0.0, par.gam * pg / rho);
@@ -67,12 +84,48 @@ void tstep(Kokkos::View<double*****> q, Parameters& par) {
 
     Kokkos::fence();
 
+#ifdef USE_MPI
+    // ------------------------------------------------------------
+    // Global CFL reduction.
+    //
+    // Each MPI rank only scans its local subdomain above.  All ranks
+    // must use the same timestep, so reduce the three directional
+    // maximum signal speeds across the Cartesian communicator.
+    // ------------------------------------------------------------
+    double local_max[3]  = {vxmax, vymax, vzmax};
+    double global_max[3] = {0.0, 0.0, 0.0};
+
+    MPI_Comm comm = (par.comm_cart == MPI_COMM_NULL)
+                  ? MPI_COMM_WORLD
+                  : par.comm_cart;
+
+    const int ierr = MPI_Allreduce(
+        local_max,
+        global_max,
+        3,
+        MPI_DOUBLE,
+        MPI_MAX,
+        comm
+    );
+
+    if (ierr != MPI_SUCCESS) {
+        if (par.rank == 0) {
+            std::cerr << "Error: MPI_Allreduce failed in tstep().\n";
+        }
+        MPI_Abort(comm, ierr);
+    }
+
+    vxmax = global_max[0];
+    vymax = global_max[1];
+    vzmax = global_max[2];
+#endif
+
     const double tiny = 1.0e-300;
     double invdt = 0.0;
 
-    if (par.nx > 1) invdt += fmax(vxmax, tiny) / par.dx;
-    if (par.ny > 1) invdt += fmax(vymax, tiny) / par.dy;
-    if (par.nz > 1) invdt += fmax(vzmax, tiny) / par.dz;
+    if (par.gnx > 1) invdt += fmax(vxmax, tiny) / par.dx;
+    if (par.gny > 1) invdt += fmax(vymax, tiny) / par.dy;
+    if (par.gnz > 1) invdt += fmax(vzmax, tiny) / par.dz;
 
     // Purely degenerate safety fallback.
     if (invdt <= 0.0) {

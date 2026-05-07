@@ -30,7 +30,7 @@ FIGURE_DIR = os.path.join(PROJECT_DIR, "figures")
 
 # If DUMP_STEP is an integer, read dump000009.vts, etc.
 # If DUMP_STEP is None, read the latest dump*.vts automatically.
-DUMP_STEP = 5
+DUMP_STEP = 6
 
 SAVE_FIGURE = True
 SHOW_FIGURE = True
