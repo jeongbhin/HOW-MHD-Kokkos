@@ -79,11 +79,9 @@ The current source layout is organized as follows:
 HOW-MHD-Kokkos/
 ├── Makefile
 ├── README.md
-├── .gitignore
-├── input*.txt
 ├── scripts/
 │   ├── plot_vts_slice.py
-│   └── plot_vts_slice_fast_spyder.py
+│   └── ...
 └── src/
     ├── main.cpp
     ├── parameters.cpp
@@ -550,7 +548,7 @@ ysize 1.0
 zsize 1.0
 
 gam 1.6666666666666667
-cour 0.3
+cour 1.50
 tend 0.01
 nt 1
 
@@ -583,7 +581,7 @@ ysize 1.0
 zsize 1.0
 
 gam 1.6666666666666667
-cour 0.25
+cour 1.50
 tend 0.05
 nt 5
 
