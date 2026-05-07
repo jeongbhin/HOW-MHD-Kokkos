@@ -1,29 +1,35 @@
 # HOW-MHD-Kokkos
 
-A Kokkos-based development version of **HOW-MHD**, a high-order WENO-based magnetohydrodynamics (MHD) code for astrophysical fluid simulations.
+A C++/Kokkos development version of **HOW-MHD**, a high-order WENO-based magnetohydrodynamics (MHD) code for astrophysical fluid simulations.
 
-This repository contains a C++/Kokkos implementation of core modules for solving ideal MHD equations using high-order finite-difference WENO reconstruction and strong-stability-preserving Runge--Kutta time integration.
+This repository contains a portable CPU-oriented implementation of the core HOW-MHD algorithm using **MPI + Kokkos/OpenMP**.  The current version supports 3D MPI domain decomposition, Kokkos/OpenMP threading within each MPI rank, high-order finite-difference WENO reconstruction, SSPRK time integration, and a high-order constrained-transport (CT) magnetic-field update.
 
-> **Status:** This repository is an active development version. Some physics modules and production-level components are still being ported and tested.
+> **Status:** Active development version.  The current code is suitable for method development, MPI/Kokkos testing, and 2D/3D MHD experiments.  Additional verification tests, production I/O improvements, and performance tuning are still ongoing.
 
 ---
 
 ## Overview
 
-**HOW-MHD-Kokkos** is intended to provide a portable, performance-oriented implementation of the HOW-MHD algorithm using the Kokkos programming model.
+**HOW-MHD-Kokkos** is intended to provide a portable, performance-oriented implementation of the HOW-MHD algorithm using Kokkos and MPI.
 
-Current code components include:
+The current implementation includes:
 
-- Input parameter parsing
-- Kokkos-based array allocation
-- Problem-dependent initial condition setup
-- Boundary condition routines
-- CFL timestep calculation
+- Runtime input parameter parsing
+- Global/local grid separation for MPI domain decomposition
+- 3D MPI Cartesian topology
+- MPI halo exchange for conserved variables
+- MPI halo exchange for CT magnetic-field arrays and CT electromotive-force/flux arrays
+- Kokkos-based array allocation and OpenMP execution
+- Problem-dependent initial condition registry
+- CFL timestep calculation with MPI global maximum reduction
 - Primitive variable conversion
 - MHD eigenstructure calculation
-- Finite-difference WENO flux reconstruction
-- SSPRK stage driver
-- Directional sweep infrastructure
+- Finite-difference WENO-type flux reconstruction
+- SSPRK(5,4) stage driver
+- Workspace-optimized x/y/z directional sweeps
+- High-order constrained-transport magnetic-field update
+- Rank-wise VTS output for parallel runs
+- Python plotting scripts for rank-wise `.vts` output
 
 The long-term goal is to provide a portable high-order MHD solver that can run efficiently on modern CPU and accelerator-based HPC systems.
 
@@ -34,13 +40,15 @@ The long-term goal is to provide a portable high-order MHD solver that can run e
 The code is based on the following numerical ingredients:
 
 - Ideal adiabatic MHD equations
-- Conservative variables
+- Conservative finite-difference formulation
 - Fifth-order finite-difference WENO-type reconstruction
 - Local Lax--Friedrichs flux splitting
 - Characteristic decomposition using MHD eigenvectors
-- Multi-stage SSPRK time integration
+- Five-stage fourth-order SSPRK time integration, SSPRK(5,4)
+- High-order constrained transport for maintaining magnetic-field consistency
 - CFL timestep based on fast magnetosonic wave speeds
-- Ghost-cell based boundary conditions
+- MPI global timestep reduction
+- Ghost-cell based boundary conditions and MPI halo exchange
 
 The conserved variable ordering used in the current implementation is
 
@@ -55,31 +63,54 @@ The conserved variable ordering used in the current implementation is
 7 : total energy
 ```
 
+The current banner/method summary is
+
+```text
+WENO5  |  SSPRK(5,4)  |  4th-order CT  |  MPI + Kokkos
+```
+
 ---
 
 ## Repository Structure
 
-The current source layout is organized under `src/`:
+The current source layout is organized as follows:
 
 ```text
 HOW-MHD-Kokkos/
 ├── Makefile
 ├── README.md
 ├── .gitignore
+├── input*.txt
+├── scripts/
+│   ├── plot_vts_slice.py
+│   └── plot_vts_slice_fast_spyder.py
 └── src/
     ├── main.cpp
     ├── parameters.cpp
     ├── parameters.hpp
+    ├── mpi_domain.cpp
+    ├── mpi_domain.hpp
     ├── bound.cpp
     ├── bound.hpp
     ├── tstep.cpp
     ├── tstep.hpp
     ├── ssprk.cpp
     ├── ssprk.hpp
-    └── ...
+    ├── fluxct.cpp
+    ├── fluxct.hpp
+    ├── output.cpp
+    ├── output.hpp
+    ├── problem.cpp
+    ├── problem.hpp
+    ├── prot.cpp
+    ├── prot.hpp
     └── problems/
+        ├── blast3d.cpp
+        ├── mpi_smooth3d.cpp
         ├── brio_wu.cpp
-        ├── mhd_rotor.hpp
+        ├── mhd_rotor.cpp
+        ├── orszag_tang.cpp
+        ├── uniform.cpp
         └── ...
 ```
 
@@ -89,7 +120,7 @@ Problem-specific initial conditions are placed under
 src/problems/
 ```
 
-For example, the MHD rotor setup is implemented as one of the sample problems.
+The selected problem is specified in the input file using the `problem` keyword.
 
 ---
 
@@ -99,31 +130,55 @@ For example, the MHD rotor setup is implemented as one of the sample problems.
 
 Main driver of the code.
 
-The driver typically performs the following steps:
+The driver performs the following steps:
 
-1. Initialize Kokkos
-2. Read runtime parameters
-3. Compute grid spacing
-4. Allocate the main conserved-variable array
-5. Initialize the selected problem
-6. Apply boundary conditions
-7. Compute timestep
-8. Advance the solution with the SSPRK/WENO solver
-9. Finalize Kokkos
+1. Initialize MPI when compiled with `USE_MPI`
+2. Initialize Kokkos
+3. Read runtime parameters from an input file
+4. Finalize global grid spacing and runtime parameters
+5. Set up MPI Cartesian domain decomposition
+6. Allocate the main conserved-variable array
+7. Initialize the selected problem
+8. Apply initial boundary conditions
+9. Allocate and initialize CT magnetic-field arrays
+10. Advance the solution with SSPRK/WENO/CT
+11. Write output
+12. Clean up Kokkos and MPI
+
+The preferred run mode is now
+
+```bash
+./bin/how_mhd_mpi input.in
+```
+
+rather than stdin redirection.  Passing the input filename explicitly ensures that every MPI rank opens the same input file.
 
 ---
 
 ### `parameters.cpp` / `parameters.hpp`
 
-Reads runtime parameters from standard input.
+Reads runtime parameters from an input stream.
 
-Example parameters include:
+The input grid size
+
+```text
+nx
+ny
+nz
+```
+
+is interpreted as the **global active grid size**.  The local grid size is computed after MPI domain setup.
+
+Common parameters include:
 
 ```text
 problem
 nx
 ny
 nz
+px
+py
+pz
 nt
 xsize
 ysize
@@ -143,38 +198,58 @@ Lines beginning with `#` are treated as comments.
 
 ---
 
-### `src/problems/`
+### `mpi_domain.cpp` / `mpi_domain.hpp`
 
-Contains problem-dependent initial condition setups.
+Sets up the MPI domain decomposition.
 
-Example:
+The code uses a 3D Cartesian MPI topology.  The input parameters
 
 ```text
-problem mhd_rotor
+px
+py
+pz
 ```
 
-The selected problem is specified in the input file using the `problem` keyword.
+specify the MPI rank layout.  The product must match the number of MPI ranks:
+
+```text
+px * py * pz = number of MPI ranks
+```
+
+For example,
+
+```text
+px 2
+py 2
+pz 1
+```
+
+requires 4 MPI ranks.
+
+Each rank stores its local active grid plus three ghost cells on each side.
 
 ---
 
 ### `bound.cpp` / `bound.hpp`
 
-Applies ghost-cell boundary conditions.
+Applies ghost-cell boundary conditions and MPI halo exchange for conserved variables.
 
-Currently supported boundary options include:
+Currently supported physical boundary options include:
 
 ```text
 periodic
 open
 ```
 
-The implementation is under active development.
+For MPI runs, rank boundaries are filled using halo exchange.  Physical boundary conditions are applied only at global domain boundaries.
 
 ---
 
 ### `tstep.cpp` / `tstep.hpp`
 
-Computes the timestep using a CFL condition based on the maximum characteristic speeds in the x, y, and z directions.
+Computes the timestep using a CFL condition based on the maximum fast magnetosonic speeds in the x, y, and z directions.
+
+For MPI runs, local maximum wave speeds are reduced with an MPI global maximum so that all ranks use the same timestep.
 
 ---
 
@@ -186,137 +261,345 @@ This module includes:
 
 - RK coefficient setup
 - Stage copying
-- x/y/z directional sweeps
+- Workspace-optimized x/y/z directional sweeps
 - Primitive-variable conversion
 - MHD eigenstructure calculation
 - WENO flux update
+- Coupling to CT flux accumulation
 
-Some routines are still under active development.
+The current optimized version keeps the fixed sweep order
+
+```text
+x -> y -> z
+```
+
+and uses workspace-based directional sweeps to reduce excessive line-by-line Kokkos kernel launch overhead.
+
+---
+
+### `fluxct.cpp` / `fluxct.hpp`
+
+Contains the high-order constrained-transport update.
+
+The current MPI-aware CT implementation includes halo exchange for:
+
+```text
+bxb, byb, bzb
+fsy, fsz, gsx, gsz, hsx, hsy
+Ox2, Oy2, Oz2
+Ox, Oy, Oz
+```
+
+This is necessary for correct magnetic-field evolution across MPI rank boundaries.
+
+---
+
+### `src/problems/`
+
+Contains problem-dependent initial condition setups.
+
+Current examples include:
+
+```text
+problem uniform
+problem mpi_smooth3d
+problem blast3d
+problem brio_wu
+problem mhd_rotor
+problem orszag_tang
+```
+
+`mpi_smooth3d` is a smooth periodic 3D test problem useful for checking MPI decomposition, halo exchange, and rank-wise output.
+
+`blast3d` is a 3D MHD blast-wave setup useful for testing nonlinear MHD evolution and CT behavior.
 
 ---
 
 ## Build
 
-This code requires a C++ compiler and Kokkos.
+This code requires:
 
-Example build command:
+- C++20-capable compiler
+- MPI compiler wrapper, such as `mpicxx`, for MPI builds
+- Kokkos installed with the OpenMP backend
 
-```bash
-make
-```
-
-The executable is expected to be generated as
+Example Kokkos installation:
 
 ```bash
-bin/how-mhd
+cd ~/codes
+
+git clone https://github.com/kokkos/kokkos.git
+cd kokkos
+
+cmake -B build -S . \
+  -DCMAKE_INSTALL_PREFIX=$HOME/codes/kokkos-install \
+  -DKokkos_ENABLE_OPENMP=ON \
+  -DKokkos_ENABLE_SERIAL=ON \
+  -DKokkos_ENABLE_TESTS=OFF \
+  -DCMAKE_CXX_STANDARD=20
+
+cmake --build build -j 16
+cmake --install build
 ```
 
-depending on the Makefile configuration.
+Set the Kokkos installation path:
+
+```bash
+export KOKKOS_ROOT=$HOME/codes/kokkos-install
+```
+
+To make this persistent:
+
+```bash
+echo 'export KOKKOS_ROOT=$HOME/codes/kokkos-install' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Build the MPI + Kokkos/OpenMP executable:
+
+```bash
+make clean
+make mpi KOKKOS_ROOT=$KOKKOS_ROOT
+```
+
+The executable is generated as
+
+```text
+bin/how_mhd_mpi
+```
+
+A serial/Kokkos-only build can be generated with
+
+```bash
+make clean
+make serial KOKKOS_ROOT=$KOKKOS_ROOT
+```
+
+which produces
+
+```text
+bin/how_mhd
+```
+
 ---
+
 ## Run
 
-Run the code with an input file through standard input:
+### MPI input style
+
+For MPI runs, pass the input filename explicitly:
 
 ```bash
-./bin/how-mhd < input.in
+./bin/how_mhd_mpi input.in
 ```
 
-For example:
+This is preferred over
 
 ```bash
-./bin/how-mhd < src/problems/mhd_rotor.in
+./bin/how_mhd_mpi < input.in
+```
+
+because stdin redirection may not be delivered reliably to every MPI rank under `srun`.
+
+---
+
+### One-rank smoke test
+
+```bash
+cd bin
+
+export OMP_NUM_THREADS=8
+export KOKKOS_NUM_THREADS=8
+export OMP_PROC_BIND=spread
+export OMP_PLACES=cores
+
+./how_mhd_mpi input_mpi_smooth3d_1rank.txt
 ```
 
 ---
 
-### Running with Kokkos OpenMP threads
+### Four-rank MPI test on one node
 
-If HOW-MHD-Kokkos is built with the Kokkos OpenMP backend, the number of CPU threads can be controlled at runtime.
+Example input layout:
 
-For example, to run with 128 OpenMP threads:
+```text
+px 2
+py 2
+pz 1
+```
+
+Run:
 
 ```bash
+cd bin
+
+export OMP_NUM_THREADS=8
+export KOKKOS_NUM_THREADS=8
+export OMP_PROC_BIND=spread
+export OMP_PLACES=cores
+
+srun -N 1 -n 4 --cpus-per-task=8 --cpu-bind=cores \
+  ./how_mhd_mpi input_mpi_smooth3d_4rank.txt
+```
+
+---
+
+### Eight-rank 3D MPI test
+
+Example input layout:
+
+```text
+px 2
+py 2
+pz 2
+```
+
+Run:
+
+```bash
+cd bin
+
+export OMP_NUM_THREADS=4
+export KOKKOS_NUM_THREADS=4
+export OMP_PROC_BIND=spread
+export OMP_PLACES=cores
+
+srun -N 1 -n 8 --cpus-per-task=4 --cpu-bind=cores \
+  ./how_mhd_mpi input_mpi_smooth3d_8rank.txt
+```
+
+---
+
+### Four-node hybrid MPI + Kokkos/OpenMP run
+
+A typical 4-node hybrid run using one MPI rank per node and 128 OpenMP threads per rank is
+
+```bash
+cd bin
+
 export OMP_NUM_THREADS=128
 export KOKKOS_NUM_THREADS=128
 export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
-./bin/how-mhd --kokkos-num-threads=128 < input.in
+srun -N 4 -n 4 --ntasks-per-node=1 \
+  --cpus-per-task=128 --cpu-bind=cores \
+  ./how_mhd_mpi input_blast3d_4rank.txt
 ```
 
-On a Slurm-based HPC system, a typical one-rank OpenMP run is
+For some systems, stdout may be block-buffered under `srun`.  The code now flushes key logs, but interactive testing can also use
 
 ```bash
-srun -N 1 -n 1 -c 128 --cpu-bind=cores \
-  ./bin/how-mhd --kokkos-num-threads=128 < input.in
+stdbuf -oL -eL srun -N 4 -n 4 --ntasks-per-node=1 \
+  --cpus-per-task=128 --cpu-bind=cores \
+  ./how_mhd_mpi input_blast3d_4rank.txt
 ```
 
-Here,
-
-```text
--N 1   : use one node
--n 1   : use one MPI rank / one process
--c 128 : assign 128 CPU cores to the process
-```
-
-The code prints the active Kokkos execution space and concurrency at startup. A successful 128-thread OpenMP run should show something like
-
-```text
-Kokkos execution space: OpenMP
-Kokkos concurrency: 128
-```
-
-If the concurrency is smaller than expected, check the runtime environment:
-
-```bash
-echo $OMP_NUM_THREADS
-echo $KOKKOS_NUM_THREADS
-echo $SLURM_CPUS_PER_TASK
-echo $SLURM_JOB_CPUS_PER_NODE
-env | grep -i kokkos
-```
-
-For large 2D/3D runs, using the Slurm `srun` form is recommended so that CPU allocation and binding are handled explicitly.
 ---
 
+### Alternative rank/thread layouts
 
-## Example Input: MHD Rotor
+Depending on the problem size and hardware, using more MPI ranks with fewer OpenMP threads per rank may be faster than using one MPI rank per node.
+
+Examples:
+
+```bash
+# 4 nodes x 2 ranks/node x 64 threads/rank = 512 cores
+export OMP_NUM_THREADS=64
+export KOKKOS_NUM_THREADS=64
+
+srun -N 4 -n 8 --ntasks-per-node=2 \
+  --cpus-per-task=64 --cpu-bind=cores \
+  ./how_mhd_mpi input_blast3d_8rank.txt
+```
+
+```bash
+# 4 nodes x 4 ranks/node x 32 threads/rank = 512 cores
+export OMP_NUM_THREADS=32
+export KOKKOS_NUM_THREADS=32
+
+srun -N 4 -n 16 --ntasks-per-node=4 \
+  --cpus-per-task=32 --cpu-bind=cores \
+  ./how_mhd_mpi input_blast3d_16rank.txt
+```
+
+The input file must satisfy
 
 ```text
-problem mhd_rotor
+px * py * pz = total MPI ranks
+```
 
-# ===== grid setup =====
-nx 128
-ny 128
-nz 1
-nt 10
+---
+
+## Example Input: 3D Smooth MPI Test
+
+```text
+problem mpi_smooth3d
+output_format vts
+
+nx 32
+ny 32
+nz 32
+
+px 2
+py 2
+pz 1
 
 xsize 1.0
 ysize 1.0
 zsize 1.0
 
-# ===== constants =====
-gam 1.6666666666667
-cour 1.5
-tend 0.15
+gam 1.6666666666666667
+cour 0.3
+tend 0.01
+nt 1
 
 rhomin 1.0e-12
 pgmin 1.0e-12
 
-# ===== boundary =====
-x1bc open
-x2bc open
-x3bc open
+x1bc periodic
+x2bc periodic
+x3bc periodic
+```
 
-# ===== output =====
-output_format vtk
+---
+
+## Example Input: 3D MHD Blast Wave
+
+```text
+problem blast3d
+output_format vts
+
+nx 128
+ny 128
+nz 128
+
+px 2
+py 2
+pz 1
+
+xsize 1.0
+ysize 1.0
+zsize 1.0
+
+gam 1.6666666666666667
+cour 0.25
+tend 0.05
+nt 5
+
+rhomin 1.0e-10
+pgmin 1.0e-10
+
+x1bc periodic
+x2bc periodic
+x3bc periodic
 ```
 
 ---
 
 ## Output
 
-HOW-MHD-Kokkos supports multiple output formats selected from the input file.
+HOW-MHD-Kokkos supports output formats selected from the input file:
 
 ```text
 output_format dat
@@ -325,8 +608,12 @@ output_format dat
 or
 
 ```text
-output_format vtk
+output_format vts
 ```
+
+The current MPI version writes one output file per MPI rank.
+
+---
 
 ### ASCII table output
 
@@ -336,43 +623,40 @@ If
 output_format dat
 ```
 
-is selected, the code writes plain text dump files:
+is selected, the code writes plain text dump files.
+
+For MPI runs, files are written as
 
 ```text
-bin/output/dump000000.dat
-bin/output/dump000001.dat
-bin/output/dump000002.dat
+bin/output/dump000000_rank000000.dat
+bin/output/dump000000_rank000001.dat
 ...
 ```
 
-Each row corresponds to one active cell. The columns are
+Each row corresponds to one active cell.  The columns include local/global indices, coordinates, conserved variables, primitive variables, and diagnostic fields.
 
-```text
-i j k x y z rho Mx My Mz Bx By Bz E pg vx vy vz divB
-```
+This format is useful for debugging, quick inspection, and small tests.
 
-where `divB` is a cell-centered diagnostic estimate of the magnetic-field divergence.
+---
 
-This format is useful for debugging, quick inspection, and small 2D tests.
-
-### Binary VTK output
+### Binary VTS output
 
 If
 
 ```text
-output_format vtk
+output_format vts
 ```
 
-is selected, the code writes ParaView-readable binary VTK StructuredGrid files:
+is selected, the code writes ParaView-readable binary VTK StructuredGrid files.
+
+For MPI runs, files are written as
 
 ```text
-bin/output/dump000000.vts
-bin/output/dump000001.vts
-bin/output/dump000002.vts
+bin/output/dump000000_rank000000.vts
+bin/output/dump000000_rank000001.vts
+bin/output/dump000000_rank000002.vts
 ...
 ```
-
-The `.vts` files contain appended raw binary data and can be opened directly with ParaView.
 
 Currently written variables include:
 
@@ -398,70 +682,87 @@ v2             = |v|^2
 B2             = |B|^2
 ```
 
-This format is recommended for visualization and larger 2D/3D simulations.
-
-### Example
-
-To write binary VTK output, add the following line to the input file:
-
-```text
-# ===== output =====
-output_format vtk
-```
-
-For debugging with plain text output, use
-
-```text
-# ===== output =====
-output_format dat
-```
-
-### Visualization
-
-The VTK output files can be opened directly in ParaView:
-
-```text
-File -> Open -> bin/output/dump000000.vts
-```
-
-For a sequence of dumps, open the `dump*.vts` series in ParaView.
-
-A Python plotting script can also read the `.vts` files using the Python VTK package:
-
-```bash
-pip install vtk
-```
-
-or, on some HPC systems,
-
-```bash
-module avail vtk
-module load vtk
-```
-
-For 3D simulations, the plotting script can extract 2D slices such as
-
-```text
-xy
-xz
-yz
-```
-
-from the binary VTK output.
+The rank-wise VTS output can be loaded in ParaView file-by-file.  A `.pvts` master-file writer is a planned convenience improvement.
 
 ---
+
+## Visualization
+
+Python plotting scripts are provided under
+
+```text
+scripts/
+```
+
+For rank-wise VTS files written under
+
+```text
+bin/output/
+```
+
+the fast Spyder-friendly script can be used to plot 2D slices without constructing a full merged 3D mesh:
+
+```bash
+python scripts/plot_vts_slice_fast_spyder.py
+```
+
+The script reads files such as
+
+```text
+bin/output/dump000001_rank000000.vts
+bin/output/dump000001_rank000001.vts
+...
+```
+
+and writes PNG figures to
+
+```text
+figures/
+```
+
+Common scalar fields include:
+
+```text
+rho
+pressure
+energy
+divB
+v_abs
+B_abs
+Bx
+By
+Bz
+vx
+vy
+vz
+```
+
+---
+
 ## Development Notes
 
-This repository is currently intended for code development, testing, and porting of HOW-MHD components to Kokkos.
+This repository is currently intended for code development, testing, and porting of HOW-MHD components to Kokkos and MPI.
+
+Recent development items include:
+
+- 3D MPI Cartesian domain decomposition
+- MPI halo exchange for conserved variables
+- MPI-aware constrained-transport magnetic-field update
+- MPI halo exchange for CT flux and EMF arrays
+- Rank-wise VTS output
+- 3D smooth periodic MPI test problem
+- 3D MHD blast-wave problem
+- Workspace-optimized directional sweeps in `ssprk.cpp`
+- Fast Python plotting utilities for rank-wise VTS output
 
 Known active-development items include:
 
-- Completing multidimensional boundary conditions
-- Adding the full constrained-transport magnetic-field update
-- Adding more production initial conditions
-- Adding output routines
-- Adding regression and verification tests
-- Improving GPU portability and performance
+- Adding `.pvts` master-file output for ParaView
+- Adding `output_format none` for performance testing
+- Adding regression tests for 1-rank vs multi-rank consistency
+- Adding global diagnostics such as min/max density, pressure, magnetic field, and `max|divB|`
+- Improving performance through further sweep and memory-layout optimization
+- Investigating GPU portability and performance
 - Cleaning up module interfaces
 
 ---
@@ -475,7 +776,7 @@ Seo, J. & Ryu, D. 2023,
 "HOW-MHD: A High-order WENO-based Magnetohydrodynamic Code with a
 High-order Constrained Transport Algorithm for Astrophysical Applications",
 The Astrophysical Journal, 953, 39.
-doi:10.3847/1538-4357/acdf4b
+doi:10.3847/1538-4357/acdfc7
 ```
 
 ---
@@ -491,3 +792,4 @@ Seo, J. & Ryu, D. 2023, The Astrophysical Journal, 953, 39.
 ## Author
 
 Jeongbhin Seo
+
